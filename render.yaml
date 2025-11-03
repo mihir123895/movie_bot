@@ -3,8 +3,9 @@ services:
     name: telegram-movie-bot
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --force-reinstall -r requirements.txt
     startCommand: python main.py
+
     envVars:
       - key: TOKEN
         sync: false
