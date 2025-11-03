@@ -322,6 +322,12 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------- MAIN ----------------------
 def main():
     init_db()
+    
+    # Check if required environment variables are set
+    if not TOKEN:
+        print("ERROR: TOKEN environment variable is not set!")
+        return
+    
     app = Application.builder().token(TOKEN).build()
 
     # Commands
@@ -334,8 +340,47 @@ def main():
     # Auto register on admin messages
     app.add_handler(MessageHandler(filters.ALL, auto_register_on_admin_message))
 
-    print("Bot started...")
-    app.run_polling()
+    # Webhook setup for Render
+    if WEBHOOK_URL:
+        print(f"Using webhook mode with URL: {WEBHOOK_URL}")
+        from flask import Flask, request
+        
+        flask_app = Flask(__name__)
+        
+        @flask_app.route("/")
+        def index():
+            return "Bot is running!"
+        
+        @flask_app.route("/webhook", methods=["POST"])
+        async def webhook():
+            """Webhook route for Telegram updates"""
+            if request.is_json:
+                update = Update.de_json(request.get_json(), app.bot)
+                await app.update_queue.put(update)
+            return "OK"
+        
+        async def set_webhook_on_start():
+            await app.initialize()
+            await app.start()
+            await app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+            print("Webhook set successfully!")
+        
+        # Start the bot
+        import threading
+        def start_bot():
+            asyncio.run(set_webhook_on_start())
+        
+        bot_thread = threading.Thread(target=start_bot)
+        bot_thread.daemon = True
+        bot_thread.start()
+        
+        print("Starting Flask server...")
+        flask_app.run(host="0.0.0.0", port=PORT)
+        
+    else:
+        # Fallback to polling if no webhook URL
+        print("Starting polling mode...")
+        app.run_polling()
 
 if __name__ == "__main__":
     main()
