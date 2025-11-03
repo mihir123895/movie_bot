@@ -1,5 +1,5 @@
 """
-Telegram Movie Delivery Bot - Webhook Version for Render
+Telegram Movie Delivery Bot - Webhook Version (upgraded for python-telegram-bot v20+/v21+)
 """
 
 from dotenv import load_dotenv
@@ -14,7 +14,13 @@ from typing import Optional, Tuple
 
 from telegram import Update
 from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 # ---------------------- CONFIG ----------------------
 TOKEN = os.getenv("TOKEN")
@@ -34,7 +40,8 @@ print(f"PORT: {PORT}")
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT UNIQUE,
@@ -49,35 +56,63 @@ def init_db():
             used_count INTEGER DEFAULT 0,
             expires_at TEXT DEFAULT NULL
         )
-    """)
+    """
+    )
     conn.commit()
     conn.close()
 
-def add_movie_record(token: str, send_method: str, filename: str, added_by: int,
-                     file_id: Optional[str]=None, from_chat_id: Optional[int]=None,
-                     from_message_id: Optional[int]=None, uses_allowed: int=-1,
-                     expires_at: Optional[str]=None):
+
+def add_movie_record(
+    token: str,
+    send_method: str,
+    filename: str,
+    added_by: int,
+    file_id: Optional[str] = None,
+    from_chat_id: Optional[int] = None,
+    from_message_id: Optional[int] = None,
+    uses_allowed: int = -1,
+    expires_at: Optional[str] = None,
+):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
     INSERT INTO movies
     (token, send_method, file_id, from_chat_id, from_message_id, filename, added_by, added_at, uses_allowed, used_count, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-""", (token, send_method, file_id, from_chat_id, from_message_id, filename, added_by, datetime.now(timezone.utc).isoformat(), uses_allowed, expires_at))
+    """,
+        (
+            token,
+            send_method,
+            file_id,
+            from_chat_id,
+            from_message_id,
+            filename,
+            added_by,
+            datetime.utcnow().isoformat(),
+            uses_allowed,
+            expires_at,
+        ),
+    )
 
     conn.commit()
     conn.close()
+
 
 def get_movie_by_token(token: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         SELECT id, token, send_method, file_id, from_chat_id, from_message_id, filename, uses_allowed, used_count, expires_at
         FROM movies WHERE token = ?
-    """, (token,))
+    """,
+        (token,),
+    )
     row = cur.fetchone()
     conn.close()
     return row
+
 
 def increment_used_count(movie_id: int):
     conn = sqlite3.connect(DB_PATH)
@@ -86,6 +121,7 @@ def increment_used_count(movie_id: int):
     conn.commit()
     conn.close()
 
+
 def remove_movie_by_token(token: str):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -93,13 +129,17 @@ def remove_movie_by_token(token: str):
     conn.commit()
     conn.close()
 
+
 def list_movies_all():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("SELECT id, token, send_method, filename, added_at, uses_allowed, used_count, expires_at, added_by FROM movies")
+    cur.execute(
+        "SELECT id, token, send_method, filename, added_at, uses_allowed, used_count, expires_at, added_by FROM movies"
+    )
     rows = cur.fetchall()
     conn.close()
     return rows
+
 
 # ---------------------- Utils ----------------------
 def parse_args_for_register(args: list) -> Tuple[int, Optional[str]]:
@@ -108,27 +148,38 @@ def parse_args_for_register(args: list) -> Tuple[int, Optional[str]]:
     for a in args:
         a = a.strip().lower()
         if re.fullmatch(r"\d+", a):
-            try: uses_allowed = int(a)
-            except: pass
+            try:
+                uses_allowed = int(a)
+            except:
+                pass
             continue
         m = re.fullmatch(r"(\d+)([smhd])", a)
         if m:
             num = int(m.group(1))
             unit = m.group(2)
             delta = None
-            if unit=="s": delta = timedelta(seconds=num)
-            elif unit=="m": delta = timedelta(minutes=num)
-            elif unit=="h": delta = timedelta(hours=num)
-            elif unit=="d": delta = timedelta(days=num)
-            if delta: expires_at_iso = (datetime.utcnow() + delta).isoformat()
+            if unit == "s":
+                delta = timedelta(seconds=num)
+            elif unit == "m":
+                delta = timedelta(minutes=num)
+            elif unit == "h":
+                delta = timedelta(hours=num)
+            elif unit == "d":
+                delta = timedelta(days=num)
+            if delta:
+                expires_at_iso = (datetime.utcnow() + delta).isoformat()
             continue
     return uses_allowed, expires_at_iso
+
 
 async def schedule_deletion(context: ContextTypes.DEFAULT_TYPE, chat_id: int, *message_ids: int):
     await asyncio.sleep(EXPIRY_SECONDS)
     for mid in message_ids:
-        try: await context.bot.delete_message(chat_id=chat_id, message_id=mid)
-        except: pass
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+        except Exception:
+            pass
+
 
 # ---------------------- Handlers ----------------------
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -141,8 +192,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/remove <token> - remove (admin)\n"
         "/help  - this message\n\n"
         "Example: /register 1 24h  (one-time, expires 24h)\n"
-        f"Bot deletes messages after {EXPIRY_SECONDS//60} mins."
+        f"Bot deletes delivered files after {EXPIRY_SECONDS//60} mins."
     )
+
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -152,42 +204,58 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     token = args[0]
     row = get_movie_by_token(token)
-    if not row: await msg.reply_text("Invalid or expired link."); return
+    if not row:
+        await msg.reply_text("Invalid or expired link.")
+        return
 
     movie_id, _tok, send_method, file_id, from_chat_id, from_message_id, filename, uses_allowed, used_count, expires_at_iso = row
 
     if expires_at_iso:
-        try: 
+        try:
             expires_dt = datetime.fromisoformat(expires_at_iso)
-            if datetime.utcnow() > expires_dt: await msg.reply_text("Sorry — this link expired."); return
-        except: pass
+            if datetime.utcnow() > expires_dt:
+                await msg.reply_text("Sorry — this link expired.")
+                return
+        except Exception:
+            pass
 
     if uses_allowed != -1 and used_count >= uses_allowed:
-        await msg.reply_text("Sorry — link used maximum times."); return
+        await msg.reply_text("Sorry — link used maximum times.")
+        return
 
     chat_id = msg.chat_id
-    try: await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
-    except: pass
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+    except Exception:
+        pass
 
     sent_message = None
     try:
-        if send_method=="copy" and from_chat_id and from_message_id:
+        if send_method == "copy" and from_chat_id and from_message_id:
             sent_message = await context.bot.copy_message(chat_id=chat_id, from_chat_id=from_chat_id, message_id=from_message_id)
         else:
+            # If send_method == "file", file_id should be the telegram file_id
             sent_message = await msg.reply_document(document=file_id, filename=filename)
     except Exception:
-        await msg.reply_text("Failed to deliver file. Contact admin."); return
+        await msg.reply_text("Failed to deliver file. Contact admin.")
+        return
 
     warn = await msg.reply_text("⚠️ Save now — will delete in 15 mins for copyright reasons.")
 
     increment_used_count(movie_id)
     to_delete_ids = [m.message_id for m in [sent_message, warn] if m]
+    # schedule deletion in background
     asyncio.create_task(schedule_deletion(context, chat_id, *to_delete_ids))
+
 
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in ADMIN_IDS: await update.message.reply_text("Unauthorized."); return
-    if not update.message.reply_to_message: await update.message.reply_text("Reply to file and run /register."); return
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("Unauthorized.")
+        return
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to file and run /register.")
+        return
 
     target = update.message.reply_to_message
     uses_allowed, expires_at_iso = parse_args_for_register(context.args)
@@ -198,45 +266,10 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     forward_msg_id = getattr(target, "forward_from_message_id", None)
 
     if forward_chat_id and forward_msg_id:
-        send_method="copy"; from_chat_id=forward_chat_id; from_message_id=forward_msg_id
-        filename = getattr(target.document, "file_name", None) or target.caption or "file"
-    elif target.document:
-        send_method="file"; file_id=target.document.file_id; filename=target.document.file_name or "file"
-    else:
-        await update.message.reply_text("Reply must contain a file/document."); return
-
-    token = secrets.token_urlsafe(12)
-    add_movie_record(token, send_method, filename, user.id, file_id, from_chat_id, from_message_id, uses_allowed, expires_at_iso)
-
-    me = await context.bot.get_me()
-    deep_link = f"https://t.me/{me.username}?start={token}"
-    await update.message.reply_text(f"Registered!\nToken: {token}\nLink:\n{deep_link}\nFilename: {filename}\nUses: {'unlimited' if uses_allowed==-1 else uses_allowed}\nExpires: {expires_at_iso or 'none'}")
-
-async def auto_register_on_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user or user.id not in ADMIN_IDS:
-        return  # ignore non-admins
-
-    target = update.message
-    if target.text and target.text.startswith("/"):
-        return  # ignore commands
-
-    send_method = file_id = from_chat_id = from_message_id = filename = None
-
-    # Attempt to get forward info
-    forward_chat_id = getattr(target, "forward_from_chat", None)
-    forward_chat_id = getattr(forward_chat_id, "id", None) if forward_chat_id else None
-    forward_msg_id = getattr(target, "forward_from_message_id", None)
-
-    if forward_chat_id and forward_msg_id:
-        # Normal forward registration
         send_method = "copy"
         from_chat_id = forward_chat_id
         from_message_id = forward_msg_id
-        if target.document and getattr(target.document, "file_name", None):
-            filename = target.document.file_name
-        else:
-            filename = target.caption or "file"
+        filename = getattr(target.document, "file_name", None) or target.caption or "file"
     elif target.document:
         send_method = "file"
         file_id = target.document.file_id
@@ -254,16 +287,87 @@ async def auto_register_on_admin_message(update: Update, context: ContextTypes.D
         file_id = target.audio.file_id
         filename = target.caption or (target.audio.file_name or "audio")
     else:
-        # Fallback: just use the message itself if media present
         media = target.document or target.video or target.animation or target.audio
         if media:
             send_method = "file"
             file_id = getattr(media, "file_id", None)
             filename = getattr(media, "file_name", None) or target.caption or "file"
         else:
-            return  # nothing to register
+            await update.message.reply_text("Reply must contain a file/document.")
+            return
 
-    # Auto-register with unlimited uses
+    token = secrets.token_urlsafe(12)
+    add_movie_record(
+        token,
+        send_method,
+        filename,
+        user.id,
+        file_id=file_id,
+        from_chat_id=from_chat_id,
+        from_message_id=from_message_id,
+        uses_allowed=uses_allowed,
+        expires_at=expires_at_iso,
+    )
+
+    me = await context.bot.get_me()
+    deep_link = f"https://t.me/{me.username}?start={token}"
+    await update.message.reply_text(
+        f"Registered!\nToken: {token}\nLink:\n{deep_link}\nFilename: {filename}\nUses: {'unlimited' if uses_allowed==-1 else uses_allowed}\nExpires: {expires_at_iso or 'none'}"
+    )
+
+
+async def auto_register_on_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id not in ADMIN_IDS:
+        return  # ignore non-admins
+
+    target = update.message
+    if not target:
+        return
+
+    # ignore commands
+    if target.text and target.text.startswith("/"):
+        return
+
+    send_method = file_id = from_chat_id = from_message_id = filename = None
+
+    forward_chat = getattr(target, "forward_from_chat", None)
+    forward_chat_id = getattr(forward_chat, "id", None) if forward_chat else None
+    forward_msg_id = getattr(target, "forward_from_message_id", None)
+
+    if forward_chat_id and forward_msg_id:
+        send_method = "copy"
+        from_chat_id = forward_chat_id
+        from_message_id = forward_msg_id
+        if getattr(target, "document", None) and getattr(target.document, "file_name", None):
+            filename = target.document.file_name
+        else:
+            filename = target.caption or "file"
+    elif getattr(target, "document", None):
+        send_method = "file"
+        file_id = target.document.file_id
+        filename = target.document.file_name or "file"
+    elif getattr(target, "video", None):
+        send_method = "file"
+        file_id = target.video.file_id
+        filename = target.caption or "video.mp4"
+    elif getattr(target, "animation", None):
+        send_method = "file"
+        file_id = target.animation.file_id
+        filename = target.caption or "animation.mp4"
+    elif getattr(target, "audio", None):
+        send_method = "file"
+        file_id = target.audio.file_id
+        filename = target.caption or (target.audio.file_name or "audio")
+    else:
+        media = getattr(target, "document", None) or getattr(target, "video", None) or getattr(target, "animation", None) or getattr(target, "audio", None)
+        if media:
+            send_method = "file"
+            file_id = getattr(media, "file_id", None)
+            filename = getattr(media, "file_name", None) or target.caption or "file"
+        else:
+            return
+
     token = secrets.token_urlsafe(12)
     add_movie_record(
         token=token,
@@ -274,7 +378,7 @@ async def auto_register_on_admin_message(update: Update, context: ContextTypes.D
         from_chat_id=from_chat_id,
         from_message_id=from_message_id,
         uses_allowed=-1,
-        expires_at=None
+        expires_at=None,
     )
 
     me = await context.bot.get_me()
@@ -282,6 +386,7 @@ async def auto_register_on_admin_message(update: Update, context: ContextTypes.D
     await update.message.reply_text(
         f"Auto-registered!\nToken: {token}\nLink:\n{deep_link}\nFilename: {filename}\nUses: unlimited\nExpires: none"
     )
+
 
 # ---------------------- ADMIN COMMANDS ----------------------
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -302,8 +407,9 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"id:{_id} token:{token}\nmethod:{send_method} name:{filename}\nadded:{added_at} by:{added_by}\nuses:{'unlimited' if uses_allowed==-1 else uses_allowed} used:{used_count} expires:{expires_at}\n"
         )
     big_text = "\n\n".join(texts)
-    for chunk in [big_text[i:i+3900] for i in range(0, len(big_text), 3900)]:
+    for chunk in [big_text[i : i + 3900] for i in range(0, len(big_text), 3900)]:
         await update.message.reply_text(chunk)
+
 
 async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -317,37 +423,52 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remove_movie_by_token(token)
     await update.message.reply_text("Removed (if existed).")
 
+
 # ---------------------- Flask App ----------------------
 from flask import Flask, request
 
 flask_app = Flask(__name__)
 
+
 @flask_app.route("/")
 def home():
     return "Telegram Movie Bot is Running! 🚀"
+
+
+# We'll create a global 'app' variable for the telegram Application
+app: Optional[Application] = None
+
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     """Webhook route for Telegram updates"""
     if request.is_json:
         try:
-            update = Update.de_json(request.get_json(), app.bot)
-            asyncio.create_task(app.process_update(update))
+            data = request.get_json()
+            update = Update.de_json(data, app.bot)
+            # schedule processing on the bot's event loop
+            try:
+                asyncio.create_task(app.process_update(update))
+            except RuntimeError:
+                # If loop isn't running in current thread, get the running loop and call create_task there.
+                loop = asyncio.get_event_loop()
+                loop.create_task(app.process_update(update))
         except Exception as e:
             print(f"Error processing update: {e}")
     return "OK"
+
 
 # ---------------------- MAIN ----------------------
 def main():
     """Main function"""
     init_db()
-    
+
     if not TOKEN:
         print("ERROR: TOKEN environment variable is not set!")
         return
-    
+
     print("Initializing bot...")
-    
+
     global app
     app = Application.builder().token(TOKEN).build()
 
@@ -359,23 +480,24 @@ def main():
     app.add_handler(CommandHandler("remove", remove_cmd))
     app.add_handler(MessageHandler(filters.ALL, auto_register_on_admin_message))
 
-    # Initialize application
+    # Initialize application (handlers ready) and set webhook
     async def initialize_app():
+        # initialize only (no long-running start). initialize makes handlers ready.
         await app.initialize()
-        await app.start()
         if WEBHOOK_URL:
             webhook_url = f"{WEBHOOK_URL}/webhook"
             await app.bot.set_webhook(webhook_url)
             print(f"Webhook set to: {webhook_url}")
         else:
-            print("No WEBHOOK_URL set, using polling")
-            await app.updater.start_polling()
+            print("No WEBHOOK_URL set; consider using polling in development")
 
-    # Run initialization
+    # Run initialization synchronously
     asyncio.run(initialize_app())
-    
+
+    # Start Flask (this will receive webhook POSTs and call app.process_update)
     print(f"Starting Flask server on port {PORT}...")
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    flask_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
+
 
 if __name__ == "__main__":
     main()
