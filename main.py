@@ -1,5 +1,5 @@
 """
-Telegram Movie Delivery Bot - Pure Webhook Version for Render
+Telegram Movie Delivery Bot - Webhook Version for Render
 """
 
 from dotenv import load_dotenv
@@ -17,7 +17,7 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # ---------------------- CONFIG ----------------------
-TOKEN = os.getenv("TOKEN", "your_bot_token_here")
+TOKEN = os.getenv("TOKEN")
 ADMIN_IDS = [1963601117]
 DB_PATH = "movies.db"
 EXPIRY_SECONDS = 15 * 60
@@ -26,8 +26,9 @@ EXPIRY_SECONDS = 15 * 60
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://movie-bot-f64d.onrender.com")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Global application instance
-app = None
+print(f"TOKEN present: {bool(TOKEN)}")
+print(f"WEBHOOK_URL: {WEBHOOK_URL}")
+print(f"PORT: {PORT}")
 
 # ---------------------- DB Helpers ----------------------
 def init_db():
@@ -316,7 +317,7 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remove_movie_by_token(token)
     await update.message.reply_text("Removed (if existed).")
 
-# ---------------------- Flask App for Render ----------------------
+# ---------------------- Flask App ----------------------
 from flask import Flask, request
 
 flask_app = Flask(__name__)
@@ -326,29 +327,28 @@ def home():
     return "Telegram Movie Bot is Running! 🚀"
 
 @flask_app.route("/webhook", methods=["POST"])
-async def webhook():
+def webhook():
     """Webhook route for Telegram updates"""
     if request.is_json:
         try:
             update = Update.de_json(request.get_json(), app.bot)
-            await app.process_update(update)
+            asyncio.create_task(app.process_update(update))
         except Exception as e:
             print(f"Error processing update: {e}")
     return "OK"
 
 # ---------------------- MAIN ----------------------
-async def setup_bot():
-    """Setup the bot application"""
-    global app
-    
+def main():
+    """Main function"""
     init_db()
     
     if not TOKEN:
         print("ERROR: TOKEN environment variable is not set!")
-        return None
+        return
     
-    print(f"Initializing bot with token: {TOKEN[:10]}...")
+    print("Initializing bot...")
     
+    global app
     app = Application.builder().token(TOKEN).build()
 
     # Add handlers
@@ -359,33 +359,21 @@ async def setup_bot():
     app.add_handler(CommandHandler("remove", remove_cmd))
     app.add_handler(MessageHandler(filters.ALL, auto_register_on_admin_message))
 
-    return app
+    # Initialize application
+    async def initialize_app():
+        await app.initialize()
+        await app.start()
+        if WEBHOOK_URL:
+            webhook_url = f"{WEBHOOK_URL}/webhook"
+            await app.bot.set_webhook(webhook_url)
+            print(f"Webhook set to: {webhook_url}")
+        else:
+            print("No WEBHOOK_URL set, using polling")
+            await app.updater.start_polling()
 
-def main():
-    """Main function to start the bot"""
-    print("Starting Telegram Movie Bot...")
-    print(f"WEBHOOK_URL: {WEBHOOK_URL}")
-    print(f"PORT: {PORT}")
+    # Run initialization
+    asyncio.run(initialize_app())
     
-    # Setup bot asynchronously
-    app_instance = asyncio.run(setup_bot())
-    
-    if not app_instance:
-        print("Failed to setup bot. Exiting.")
-        return
-    
-    # Set webhook
-    async def set_webhook():
-        await app_instance.initialize()
-        await app_instance.start()
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        await app_instance.bot.set_webhook(webhook_url)
-        print(f"Webhook set to: {webhook_url}")
-    
-    # Run webhook setup
-    asyncio.run(set_webhook())
-    
-    # Start Flask server
     print(f"Starting Flask server on port {PORT}...")
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
