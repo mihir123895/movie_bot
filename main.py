@@ -24,11 +24,14 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 
 # ---------------------- CONFIG ----------------------
-TOKEN = os.getenv("TOKEN")  # Secure way       # <-- Replace with your BotFather token
-ADMIN_IDS = [1963601117]             # <-- Replace with your numeric Telegram user id(s)
+TOKEN = os.getenv("TOKEN", "your_bot_token_here")  # Temporary fallback
+ADMIN_IDS = [1963601117]
 DB_PATH = "movies.db"
-EXPIRY_SECONDS = 15 * 60         # Bot messages auto-delete after 15 mins
-# ----------------------------------------------------
+EXPIRY_SECONDS = 15 * 60    # Bot messages auto-delete after 15 mins
+
+# Webhook settings
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://movie-bot-f64d.onrender.com")
+PORT = int(os.getenv("PORT", "10000"))
 
 # ---------------------- DB Helpers ----------------------
 def init_db():
