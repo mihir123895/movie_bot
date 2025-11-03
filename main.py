@@ -321,7 +321,6 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = context.args[0].strip()
     remove_movie_by_token(token)
     await update.message.reply_text("Removed (if existed).")
-
 # ---------------------- MAIN ----------------------
 def main():
     init_db()
@@ -330,6 +329,9 @@ def main():
     if not TOKEN:
         print("ERROR: TOKEN environment variable is not set!")
         return
+    
+    print(f"Starting bot with WEBHOOK_URL: {WEBHOOK_URL}")
+    print(f"Port: {PORT}")
     
     app = Application.builder().token(TOKEN).build()
 
@@ -347,6 +349,7 @@ def main():
     if WEBHOOK_URL:
         print(f"Using webhook mode with URL: {WEBHOOK_URL}")
         from flask import Flask, request
+        import threading
         
         flask_app = Flask(__name__)
         
@@ -362,23 +365,25 @@ def main():
                 await app.update_queue.put(update)
             return "OK"
         
-        async def set_webhook_on_start():
+        async def start_bot():
             await app.initialize()
             await app.start()
-            await app.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-            print("Webhook set successfully!")
+            # Set webhook
+            webhook_url = f"{WEBHOOK_URL}/webhook"
+            await app.bot.set_webhook(webhook_url)
+            print(f"Webhook set to: {webhook_url}")
         
-        # Start the bot
-        import threading
-        def start_bot():
-            asyncio.run(set_webhook_on_start())
+        # Start bot in background thread
+        def run_bot():
+            asyncio.run(start_bot())
         
-        bot_thread = threading.Thread(target=start_bot)
+        bot_thread = threading.Thread(target=run_bot)
         bot_thread.daemon = True
         bot_thread.start()
         
-        print("Starting Flask server...")
-        flask_app.run(host="0.0.0.0", port=PORT)
+        # Start Flask server - IMPORTANT: This must run in main thread
+        print(f"Starting Flask server on port {PORT}...")
+        flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
         
     else:
         # Fallback to polling if no webhook URL
