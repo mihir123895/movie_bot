@@ -1,10 +1,5 @@
 """
-Telegram Movie Delivery Bot
-- Auto-register on admin-forward/upload
-- /register to manually register files
-- /start <token> to get file
-- /list, /remove for admin
-Requirements: pip install python-telegram-bot==20.5
+Telegram Movie Delivery Bot - Pure Webhook Version for Render
 """
 
 from dotenv import load_dotenv
@@ -14,24 +9,25 @@ import asyncio
 import sqlite3
 import secrets
 import re
-from datetime import datetime,timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
 
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-
-
 # ---------------------- CONFIG ----------------------
-TOKEN = os.getenv("TOKEN", "your_bot_token_here")  # Temporary fallback
+TOKEN = os.getenv("TOKEN", "your_bot_token_here")
 ADMIN_IDS = [1963601117]
 DB_PATH = "movies.db"
-EXPIRY_SECONDS = 15 * 60    # Bot messages auto-delete after 15 mins
+EXPIRY_SECONDS = 15 * 60
 
 # Webhook settings
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://movie-bot-f64d.onrender.com")
 PORT = int(os.getenv("PORT", "10000"))
+
+# Global application instance
+app = None
 
 # ---------------------- DB Helpers ----------------------
 def init_db():
@@ -127,10 +123,10 @@ def parse_args_for_register(args: list) -> Tuple[int, Optional[str]]:
             continue
     return uses_allowed, expires_at_iso
 
-async def schedule_deletion(app: Application, chat_id: int, *message_ids: int):
+async def schedule_deletion(context: ContextTypes.DEFAULT_TYPE, chat_id: int, *message_ids: int):
     await asyncio.sleep(EXPIRY_SECONDS)
     for mid in message_ids:
-        try: await app.bot.delete_message(chat_id=chat_id, message_id=mid)
+        try: await context.bot.delete_message(chat_id=chat_id, message_id=mid)
         except: pass
 
 # ---------------------- Handlers ----------------------
@@ -185,7 +181,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     increment_used_count(movie_id)
     to_delete_ids = [m.message_id for m in [sent_message, warn] if m]
-    asyncio.create_task(schedule_deletion(context.application, chat_id, *to_delete_ids))
+    asyncio.create_task(schedule_deletion(context, chat_id, *to_delete_ids))
 
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -286,8 +282,6 @@ async def auto_register_on_admin_message(update: Update, context: ContextTypes.D
         f"Auto-registered!\nToken: {token}\nLink:\n{deep_link}\nFilename: {filename}\nUses: unlimited\nExpires: none"
     )
 
-
-
 # ---------------------- ADMIN COMMANDS ----------------------
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -321,74 +315,79 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = context.args[0].strip()
     remove_movie_by_token(token)
     await update.message.reply_text("Removed (if existed).")
+
+# ---------------------- Flask App for Render ----------------------
+from flask import Flask, request
+
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "Telegram Movie Bot is Running! 🚀"
+
+@flask_app.route("/webhook", methods=["POST"])
+async def webhook():
+    """Webhook route for Telegram updates"""
+    if request.is_json:
+        try:
+            update = Update.de_json(request.get_json(), app.bot)
+            await app.process_update(update)
+        except Exception as e:
+            print(f"Error processing update: {e}")
+    return "OK"
+
 # ---------------------- MAIN ----------------------
-def main():
+async def setup_bot():
+    """Setup the bot application"""
+    global app
+    
     init_db()
     
-    # Check if required environment variables are set
     if not TOKEN:
         print("ERROR: TOKEN environment variable is not set!")
-        return
+        return None
     
-    print(f"Starting bot with WEBHOOK_URL: {WEBHOOK_URL}")
-    print(f"Port: {PORT}")
+    print(f"Initializing bot with token: {TOKEN[:10]}...")
     
     app = Application.builder().token(TOKEN).build()
 
-    # Commands
+    # Add handlers
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("register", register_cmd))
     app.add_handler(CommandHandler("list", list_cmd))
     app.add_handler(CommandHandler("remove", remove_cmd))
-
-    # Auto register on admin messages
     app.add_handler(MessageHandler(filters.ALL, auto_register_on_admin_message))
 
-    # Webhook setup for Render
-    if WEBHOOK_URL:
-        print(f"Using webhook mode with URL: {WEBHOOK_URL}")
-        from flask import Flask, request
-        import threading
-        
-        flask_app = Flask(__name__)
-        
-        @flask_app.route("/")
-        def index():
-            return "Bot is running!"
-        
-        @flask_app.route("/webhook", methods=["POST"])
-        async def webhook():
-            """Webhook route for Telegram updates"""
-            if request.is_json:
-                update = Update.de_json(request.get_json(), app.bot)
-                await app.update_queue.put(update)
-            return "OK"
-        
-        async def start_bot():
-            await app.initialize()
-            await app.start()
-            # Set webhook
-            webhook_url = f"{WEBHOOK_URL}/webhook"
-            await app.bot.set_webhook(webhook_url)
-            print(f"Webhook set to: {webhook_url}")
-        
-        # Start bot in background thread
-        def run_bot():
-            asyncio.run(start_bot())
-        
-        bot_thread = threading.Thread(target=run_bot)
-        bot_thread.daemon = True
-        bot_thread.start()
-        
-        # Start Flask server - IMPORTANT: This must run in main thread
-        print(f"Starting Flask server on port {PORT}...")
-        flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-        
-    else:
-        # Fallback to polling if no webhook URL
-        print("Starting polling mode...")
-        app.run_polling()
+    return app
+
+def main():
+    """Main function to start the bot"""
+    print("Starting Telegram Movie Bot...")
+    print(f"WEBHOOK_URL: {WEBHOOK_URL}")
+    print(f"PORT: {PORT}")
+    
+    # Setup bot asynchronously
+    app_instance = asyncio.run(setup_bot())
+    
+    if not app_instance:
+        print("Failed to setup bot. Exiting.")
+        return
+    
+    # Set webhook
+    async def set_webhook():
+        await app_instance.initialize()
+        await app_instance.start()
+        webhook_url = f"{WEBHOOK_URL}/webhook"
+        await app_instance.bot.set_webhook(webhook_url)
+        print(f"Webhook set to: {webhook_url}")
+    
+    # Run webhook setup
+    asyncio.run(set_webhook())
+    
+    # Start Flask server
+    print(f"Starting Flask server on port {PORT}...")
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
     main()
